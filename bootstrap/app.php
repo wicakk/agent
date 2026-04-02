@@ -15,6 +15,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'role'               => \App\Http\Middleware\CheckRole::class,
             'check.subscription' => \App\Http\Middleware\CheckSubscription::class,
             'check.user.limit'   => \App\Http\Middleware\CheckUserLimit::class,
+            'branch.scope'       => \App\Http\Middleware\SetBranchScope::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {

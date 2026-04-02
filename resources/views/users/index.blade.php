@@ -1,7 +1,7 @@
 @extends('layouts.app')
 @section('title', 'Tim Sales')
 @section('page-title', 'Manajemen User')
-@section('breadcrumb', 'Kelola tim sales lapangan')
+@section('breadcrumb', auth()->user()->isOwner() ? 'Semua cabang' : (auth()->user()->branch?->name ?? 'Cabang Anda'))
 
 @section('content')
 
@@ -10,9 +10,13 @@
     <div class="flex-1">
         <p class="text-sm font-semibold text-indigo-800 dark:text-indigo-200">
             Penggunaan User: <strong>{{ $userCount }}</strong> / {{ $userLimit }} user aktif
+            @if(!auth()->user()->isOwner() && auth()->user()->branch)
+            <span class="text-indigo-500 dark:text-indigo-400 font-normal">({{ auth()->user()->branch->name }})</span>
+            @endif
         </p>
         <div class="mt-2 h-2 bg-indigo-200 dark:bg-indigo-900 rounded-full overflow-hidden">
-            <div class="h-full bg-indigo-500 rounded-full transition-all" style="width: {{ $userLimit > 0 ? min(100, ($userCount/$userLimit)*100) : 0 }}%"></div>
+            @php $pct = $userLimit > 0 ? min(100, ($userCount/$userLimit)*100) : 0 @endphp
+            <div class="h-full rounded-full transition-all {{ $pct >= 90 ? 'bg-red-500' : 'bg-indigo-500' }}" style="width: {{ $pct }}%"></div>
         </div>
     </div>
     @if($userCount < $userLimit)
@@ -21,9 +25,7 @@
         Tambah User
     </x-button>
     @else
-    <x-button variant="secondary" size="sm" href="#">
-        Upgrade Paket
-    </x-button>
+    <x-button variant="secondary" size="sm" href="{{ route('billing.index') }}">Upgrade Paket</x-button>
     @endif
 </div>
 
@@ -34,8 +36,10 @@
                 <tr class="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800">
                     <th class="text-left px-5 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">User</th>
                     <th class="text-left px-4 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider hidden sm:table-cell">Role</th>
+                    @if(auth()->user()->isOwner())
+                    <th class="text-left px-4 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider hidden md:table-cell">Cabang</th>
+                    @endif
                     <th class="text-center px-4 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider hidden md:table-cell">Transaksi</th>
-                    <th class="text-center px-4 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider hidden md:table-cell">Aktivitas</th>
                     <th class="text-center px-4 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
                     <th class="text-right px-5 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">Aksi</th>
                 </tr>
@@ -55,11 +59,30 @@
                     <td class="px-4 py-4 hidden sm:table-cell">
                         <x-badge :color="$user->role_color" size="xs">{{ ucfirst($user->role) }}</x-badge>
                     </td>
+                    @if(auth()->user()->isOwner())
+                    <td class="px-4 py-4 hidden md:table-cell">
+                        @if($user->branch)
+                            <span class="text-sm text-slate-700 dark:text-slate-300">{{ $user->branch->name }}</span>
+                        @elseif(!$user->isOwner())
+                            {{-- Assign branch dropdown --}}
+                            <form method="POST" action="{{ route('branches.assign-user') }}" class="flex items-center gap-2">
+                                @csrf
+                                <input type="hidden" name="user_id" value="{{ $user->id }}">
+                                <select name="branch_id" class="text-xs bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-1 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                                    <option value="">Pilih cabang...</option>
+                                    @foreach($branches as $branch)
+                                    <option value="{{ $branch->id }}">{{ $branch->name }}</option>
+                                    @endforeach
+                                </select>
+                                <button type="submit" class="text-xs px-2 py-1 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-semibold">Assign</button>
+                            </form>
+                        @else
+                            <span class="text-xs text-slate-400 italic">Owner (semua)</span>
+                        @endif
+                    </td>
+                    @endif
                     <td class="px-4 py-4 text-center hidden md:table-cell text-slate-600 dark:text-slate-400">
                         {{ $user->transactions_count }}
-                    </td>
-                    <td class="px-4 py-4 text-center hidden md:table-cell text-slate-600 dark:text-slate-400">
-                        {{ $user->sales_activities_count }}
                     </td>
                     <td class="px-4 py-4 text-center">
                         @if($user->is_active)
@@ -74,11 +97,13 @@
                             <form method="POST" action="{{ route('users.toggle', $user) }}">
                                 @csrf @method('PATCH')
                                 <button type="submit" class="p-1.5 rounded-lg transition-colors {{ $user->is_active ? 'text-slate-400 hover:text-yellow-600 hover:bg-yellow-50 dark:hover:bg-yellow-950' : 'text-slate-400 hover:text-green-600 hover:bg-green-50 dark:hover:bg-green-950' }}" title="{{ $user->is_active ? 'Nonaktifkan' : 'Aktifkan' }}">
-                                    @if($user->is_active)
-                                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/></svg>
-                                    @else
-                                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                                    @endif
+                                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                                        @if($user->is_active)
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/>
+                                        @else
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                                        @endif
+                                    </svg>
                                 </button>
                             </form>
                             <a href="{{ route('users.edit', $user) }}" class="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950 rounded-lg transition-colors">
@@ -106,5 +131,4 @@
     <div class="px-5 py-4 border-t border-slate-100 dark:border-slate-800">{{ $users->links() }}</div>
     @endif
 </x-card>
-
 @endsection

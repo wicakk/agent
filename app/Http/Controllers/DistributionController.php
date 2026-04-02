@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Controllers\Concerns\ScopesByBranch;
 use App\Models\Distribution;
 use App\Models\DistributionItem;
 use App\Models\Product;
@@ -12,18 +13,25 @@ use Illuminate\Support\Facades\DB;
 
 class DistributionController extends Controller
 {
+    use ScopesByBranch;
+
     public function index(Request $request)
     {
-        $company = Auth::user()->company;
-        $query   = $company->distributions()->with(['driver', 'store', 'warehouse', 'items.product']);
+        $query = $this->branchScope(Distribution::query())
+            ->with(['driver', 'store', 'warehouse', 'items.product']);
 
         if ($request->filled('status'))    $query->where('status', $request->status);
         if ($request->filled('driver_id')) $query->where('driver_id', $request->driver_id);
-        if ($request->filled('search'))    $query->where('delivery_no', 'like', '%' . $request->search . '%');
+        if ($request->filled('search'))    $query->where('delivery_no', 'like', '%'.$request->search.'%');
 
         $distributions = $query->latest()->paginate(15)->withQueryString();
-        $drivers       = $company->users()->where('role', 'sales')->where('is_active', true)->get();
-        $statusCounts  = $company->distributions()
+
+        $drivers = $this->branchScope(\App\Models\User::query())
+            ->where('is_active', true)
+            ->whereIn('role', ['sales','admin'])
+            ->get();
+
+        $statusCounts = $this->branchScope(Distribution::query())
             ->selectRaw('status, COUNT(*) as count')
             ->groupBy('status')
             ->pluck('count', 'status');
@@ -33,15 +41,15 @@ class DistributionController extends Controller
 
     public function create()
     {
-        $company    = Auth::user()->company;
-        $drivers    = $company->users()->where('is_active', true)->whereIn('role', ['sales','admin'])->get();
-        $stores     = $company->stores()->whereIn('status', ['active','potential'])->orderBy('name')->get();
-        $warehouses = $company->warehouses()->where('is_active', true)->get();
-        $products   = $company->products()->where('is_active', true)->where('stock_current', '>', 0)->orderBy('name')->get();
+        $user       = Auth::user();
+        $drivers    = $this->branchScope(\App\Models\User::query())->where('is_active', true)->whereIn('role', ['sales','admin'])->get();
+        $stores     = $this->branchScope(\App\Models\Store::query())->whereIn('status', ['active','potential'])->orderBy('name')->get();
+        $warehouses = $this->branchScope(\App\Models\Warehouse::query())->where('is_active', true)->get();
+        $products   = $this->branchScope(Product::query())->where('is_active', true)->where('stock_current', '>', 0)->orderBy('name')->get();
 
         if ($warehouses->isEmpty()) {
             return redirect()->route('distribution.index')
-                ->with('error', 'Buat gudang terlebih dahulu sebelum membuat distribusi.');
+                ->with('error', 'Buat gudang untuk cabang ini terlebih dahulu.');
         }
 
         return view('distribution.create', compact('drivers', 'stores', 'warehouses', 'products'));
@@ -49,7 +57,7 @@ class DistributionController extends Controller
 
     public function store(Request $request)
     {
-        $company   = Auth::user()->company;
+        $user      = Auth::user();
         $validated = $request->validate([
             'warehouse_id'        => 'required|exists:warehouses,id',
             'driver_id'           => 'required|exists:users,id',
@@ -63,8 +71,10 @@ class DistributionController extends Controller
             'items.*.unit_price'  => 'required|numeric|min:0',
         ]);
 
-        DB::transaction(function () use ($validated, $company) {
-            $distribution = $company->distributions()->create([
+        DB::transaction(function () use ($validated, $user) {
+            $distribution = Distribution::create([
+                'company_id'          => $user->company_id,
+                'branch_id'           => $user->branch_id,
                 'warehouse_id'        => $validated['warehouse_id'],
                 'driver_id'           => $validated['driver_id'],
                 'store_id'            => $validated['store_id'] ?? null,
@@ -84,8 +94,7 @@ class DistributionController extends Controller
             }
         });
 
-        return redirect()->route('distribution.index')
-            ->with('success', 'Distribusi berhasil dibuat.');
+        return redirect()->route('distribution.index')->with('success', 'Distribusi berhasil dibuat.');
     }
 
     public function show(Distribution $distribution)
@@ -98,15 +107,11 @@ class DistributionController extends Controller
     public function updateStatus(Request $request, Distribution $distribution)
     {
         $this->authorizeDistribution($distribution);
+        $request->validate(['status' => 'required|in:pending,in_transit,delivered,cancelled,returned']);
 
-        $request->validate([
-            'status' => 'required|in:pending,in_transit,delivered,cancelled,returned',
-        ]);
-
-        $newStatus = $request->status;
-
-        DB::transaction(function () use ($distribution, $newStatus) {
-            $updates = ['status' => $newStatus];
+        DB::transaction(function () use ($distribution, $request) {
+            $newStatus = $request->status;
+            $updates   = ['status' => $newStatus];
 
             if ($newStatus === 'in_transit' && !$distribution->departed_at) {
                 $updates['departed_at'] = now();
@@ -114,65 +119,51 @@ class DistributionController extends Controller
 
             if ($newStatus === 'delivered' && !$distribution->delivered_at) {
                 $updates['delivered_at'] = now();
-
-                // Deduct stock for each item
                 foreach ($distribution->items as $item) {
                     $product = Product::find($item->product_id);
                     if (!$product) continue;
-
-                    $qtyDelivered = $item->quantity_requested; // deliver full amount
-                    if ($product->stock_current < $qtyDelivered) {
-                        $qtyDelivered = $product->stock_current; // deliver what's available
-                    }
-
-                    if ($qtyDelivered > 0) {
-                        $stockBefore = $product->stock_current;
-                        $product->decrement('stock_current', $qtyDelivered);
-
+                    $qty = min($item->quantity_requested, $product->stock_current);
+                    if ($qty > 0) {
+                        $before = $product->stock_current;
+                        $product->decrement('stock_current', $qty);
                         StockMovement::create([
                             'company_id'   => $distribution->company_id,
                             'product_id'   => $product->id,
                             'warehouse_id' => $distribution->warehouse_id,
                             'user_id'      => Auth::id(),
                             'type'         => 'out',
-                            'quantity'     => $qtyDelivered,
-                            'stock_before' => $stockBefore,
+                            'quantity'     => $qty,
+                            'stock_before' => $before,
                             'stock_after'  => $product->stock_current,
                             'reference_no' => $distribution->delivery_no,
                             'reason'       => 'Distribusi ' . $distribution->delivery_no,
                         ]);
-
-                        $item->update(['quantity_delivered' => $qtyDelivered]);
+                        $item->update(['quantity_delivered' => $qty]);
                     }
                 }
             }
-
             $distribution->update($updates);
         });
 
-        return back()->with('success', 'Status distribusi diperbarui menjadi: ' . $distribution->fresh()->status_label);
+        return back()->with('success', 'Status distribusi diperbarui.');
     }
 
     public function destroy(Distribution $distribution)
     {
         $this->authorizeDistribution($distribution);
-
         if ($distribution->status !== 'pending') {
             return back()->with('error', 'Hanya distribusi berstatus Pending yang dapat dihapus.');
         }
-
         $no = $distribution->delivery_no;
         $distribution->items()->delete();
         $distribution->delete();
-
-        return redirect()->route('distribution.index')
-            ->with('success', "Distribusi {$no} berhasil dihapus.");
+        return redirect()->route('distribution.index')->with('success', "Distribusi {$no} berhasil dihapus.");
     }
 
     private function authorizeDistribution(Distribution $distribution): void
     {
-        if ($distribution->company_id !== Auth::user()->company_id) {
-            abort(403, 'Akses tidak diizinkan.');
-        }
+        $user = Auth::user();
+        if ($distribution->company_id !== $user->company_id) abort(403);
+        if (!$user->isOwner() && $distribution->branch_id !== $user->branch_id) abort(403, 'Distribusi ini bukan milik cabang Anda.');
     }
 }

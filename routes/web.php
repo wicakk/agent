@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Auth\AuthController;
 use App\Http\Controllers\BillingController;
+use App\Http\Controllers\BranchController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DistributionController;
 use App\Http\Controllers\ReportController;
@@ -20,11 +21,12 @@ Route::middleware('guest')->group(function () {
 
 Route::post('/logout', [AuthController::class, 'logout'])->name('logout')->middleware('auth');
 
-Route::middleware(['auth', 'check.subscription'])->group(function () {
+Route::middleware(['auth', 'check.subscription', 'branch.scope'])->group(function () {
 
     Route::get('/', fn() => redirect()->route('dashboard'));
     Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
 
+    // Stock
     Route::prefix('stock')->name('stock.')->group(function () {
         Route::get('/',                    [StockController::class, 'index'])->name('index');
         Route::get('/create',             [StockController::class, 'create'])->name('create')->middleware('role:owner,admin');
@@ -36,6 +38,7 @@ Route::middleware(['auth', 'check.subscription'])->group(function () {
         Route::delete('/{product}',       [StockController::class, 'destroy'])->name('destroy')->middleware('role:owner,admin');
     });
 
+    // Distributions
     Route::prefix('distribution')->name('distribution.')->group(function () {
         Route::get('/',                         [DistributionController::class, 'index'])->name('index');
         Route::get('/create',                   [DistributionController::class, 'create'])->name('create')->middleware('role:owner,admin');
@@ -47,6 +50,7 @@ Route::middleware(['auth', 'check.subscription'])->group(function () {
 
     Route::resource('stores', StoreController::class);
 
+    // Users
     Route::prefix('users')->name('users.')->middleware('role:owner,admin')->group(function () {
         Route::get('/',               [UserController::class, 'index'])->name('index');
         Route::get('/create',        [UserController::class, 'create'])->name('create');
@@ -57,17 +61,32 @@ Route::middleware(['auth', 'check.subscription'])->group(function () {
         Route::delete('/{user}',     [UserController::class, 'destroy'])->name('destroy');
     });
 
+    // Branches (Owner only)
+    Route::prefix('branches')->name('branches.')->middleware('role:owner')->group(function () {
+        Route::get('/',               [BranchController::class, 'index'])->name('index');
+        Route::get('/create',        [BranchController::class, 'create'])->name('create');
+        Route::post('/',              [BranchController::class, 'store'])->name('store');
+        Route::get('/{branch}',      [BranchController::class, 'show'])->name('show');
+        Route::get('/{branch}/edit', [BranchController::class, 'edit'])->name('edit');
+        Route::put('/{branch}',      [BranchController::class, 'update'])->name('update');
+        Route::delete('/{branch}',   [BranchController::class, 'destroy'])->name('destroy');
+        Route::post('/assign-user',  [BranchController::class, 'assignUser'])->name('assign-user');
+    });
+
+    // Reports
     Route::prefix('reports')->name('reports.')->group(function () {
         Route::get('/',      [ReportController::class, 'index'])->name('index');
         Route::get('/pdf',   [ReportController::class, 'exportPdf'])->name('export-pdf');
         Route::get('/excel', [ReportController::class, 'exportExcel'])->name('export-excel');
     });
 
+    // Tracking
     Route::prefix('tracking')->name('tracking.')->group(function () {
         Route::get('/',         [TrackingController::class, 'index'])->name('index');
         Route::post('/log-gps', [TrackingController::class, 'logGps'])->name('log-gps');
     });
 
+    // Billing (Owner only)
     Route::prefix('billing')->name('billing.')->middleware('role:owner')->group(function () {
         Route::get('/',        [BillingController::class, 'index'])->name('index');
         Route::post('/upgrade',[BillingController::class, 'upgrade'])->name('upgrade');

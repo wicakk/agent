@@ -16,14 +16,16 @@ class Company extends Model
         'address', 'city', 'province', 'is_active',
     ];
 
-    protected $casts = [
-        'is_active' => 'boolean',
-    ];
+    protected $casts = ['is_active' => 'boolean'];
 
-    public function users(): HasMany
-    {
-        return $this->hasMany(User::class);
-    }
+    public function users(): HasMany        { return $this->hasMany(User::class); }
+    public function branches(): HasMany     { return $this->hasMany(Branch::class); }
+    public function warehouses(): HasMany   { return $this->hasMany(Warehouse::class); }
+    public function products(): HasMany     { return $this->hasMany(Product::class); }
+    public function stores(): HasMany       { return $this->hasMany(Store::class); }
+    public function distributions(): HasMany{ return $this->hasMany(Distribution::class); }
+    public function transactions(): HasMany { return $this->hasMany(Transaction::class); }
+    public function subscriptions(): HasMany{ return $this->hasMany(Subscription::class); }
 
     public function activeSubscription(): HasOne
     {
@@ -32,36 +34,7 @@ class Company extends Model
             ->latest('id');
     }
 
-    public function subscriptions(): HasMany
-    {
-        return $this->hasMany(Subscription::class);
-    }
-
-    public function warehouses(): HasMany
-    {
-        return $this->hasMany(Warehouse::class);
-    }
-
-    public function products(): HasMany
-    {
-        return $this->hasMany(Product::class);
-    }
-
-    public function stores(): HasMany
-    {
-        return $this->hasMany(Store::class);
-    }
-
-    public function distributions(): HasMany
-    {
-        return $this->hasMany(Distribution::class);
-    }
-
-    public function transactions(): HasMany
-    {
-        return $this->hasMany(Transaction::class);
-    }
-
+    // Total sales across ALL branches
     public function salesCount(): int
     {
         return $this->users()

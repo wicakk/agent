@@ -57,6 +57,22 @@
         {{-- Navigation --}}
         <nav class="flex-1 px-3 py-4 space-y-1 overflow-y-auto scrollbar-hide">
 
+            {{-- Branch Badge (Admin/Sales) --}}
+            @if(!auth()->user()->isOwner() && auth()->user()->branch)
+            <div class="mb-2 px-3 py-2 bg-indigo-50 dark:bg-indigo-950 rounded-xl border border-indigo-100 dark:border-indigo-900">
+                <p class="text-[10px] font-semibold text-indigo-400 uppercase tracking-wider">Cabang Anda</p>
+                <p class="text-sm font-bold text-indigo-700 dark:text-indigo-300 truncate">{{ auth()->user()->branch->name }}</p>
+            </div>
+            @endif
+
+            {{-- No Branch Warning --}}
+            @if(!auth()->user()->isOwner() && !auth()->user()->branch_id)
+            <div class="mb-2 px-3 py-2 bg-amber-50 dark:bg-amber-950 rounded-xl border border-amber-200 dark:border-amber-900">
+                <p class="text-xs font-semibold text-amber-700 dark:text-amber-300">⚠ Belum di-assign ke cabang</p>
+                <p class="text-xs text-amber-600 dark:text-amber-400">Hubungi Owner untuk assign cabang</p>
+            </div>
+            @endif
+
             @php
                 $navItems = [
                     ['route' => 'dashboard', 'label' => 'Dashboard', 'icon' => 'home', 'roles' => ['owner','admin','sales']],
@@ -64,6 +80,7 @@
                     ['route' => 'distribution.index', 'label' => 'Distribusi', 'icon' => 'truck', 'roles' => ['owner','admin','sales']],
                     ['route' => 'stores.index', 'label' => 'Manajemen Toko', 'icon' => 'building-storefront', 'roles' => ['owner','admin','sales']],
                     ['route' => 'users.index', 'label' => 'Tim Sales', 'icon' => 'user-group', 'roles' => ['owner','admin']],
+                    ['route' => 'branches.index', 'label' => 'Cabang', 'icon' => 'building-office', 'roles' => ['owner']],
                 ];
             @endphp
 

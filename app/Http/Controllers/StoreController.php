@@ -2,32 +2,33 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Controllers\Concerns\ScopesByBranch;
 use App\Models\Store;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 
 class StoreController extends Controller
 {
+    use ScopesByBranch;
+
     public function index(Request $request)
     {
-        $company = Auth::user()->company;
-        $query   = $company->stores()->with('salesUser');
+        $query = $this->branchScope(Store::query())->with('salesUser');
 
         if ($request->filled('search')) {
             $s = $request->search;
             $query->where(fn($q) => $q
-                ->where('name',       'like', "%{$s}%")
-                ->orWhere('owner_name','like', "%{$s}%")
-                ->orWhere('city',      'like', "%{$s}%")
-                ->orWhere('district',  'like', "%{$s}%")
+                ->where('name',       'like', "%$s%")
+                ->orWhere('owner_name','like', "%$s%")
+                ->orWhere('city',      'like', "%$s%")
             );
         }
         if ($request->filled('status'))  $query->where('status', $request->status);
         if ($request->filled('user_id')) $query->where('user_id', $request->user_id);
 
         $stores      = $query->orderBy('name')->paginate(18)->withQueryString();
-        $salesUsers  = $company->users()->where('role', 'sales')->where('is_active', true)->get();
-        $statusCount = $company->stores()
+        $salesUsers  = $this->branchScope(\App\Models\User::query())->where('role','sales')->where('is_active',true)->get();
+        $statusCount = $this->branchScope(Store::query())
             ->selectRaw('status, COUNT(*) as count')
             ->groupBy('status')
             ->pluck('count', 'status');
@@ -37,17 +38,13 @@ class StoreController extends Controller
 
     public function create()
     {
-        $salesUsers = Auth::user()->company->users()
-            ->where('role', 'sales')
-            ->where('is_active', true)
-            ->get();
-
+        $salesUsers = $this->branchScope(\App\Models\User::query())->where('role','sales')->where('is_active',true)->get();
         return view('stores.create', compact('salesUsers'));
     }
 
     public function store(Request $request)
     {
-        $company   = Auth::user()->company;
+        $user      = Auth::user();
         $validated = $request->validate([
             'name'       => 'required|string|max:100',
             'owner_name' => 'nullable|string|max:100',
@@ -63,9 +60,13 @@ class StoreController extends Controller
             'notes'      => 'nullable|string|max:1000',
         ]);
 
-        $company->stores()->create($validated);
-        return redirect()->route('stores.index')
-            ->with('success', 'Toko "' . $validated['name'] . '" berhasil ditambahkan.');
+        Store::create([
+            ...$validated,
+            'company_id' => $user->company_id,
+            'branch_id'  => $user->branch_id,
+        ]);
+
+        return redirect()->route('stores.index')->with('success', 'Toko berhasil ditambahkan.');
     }
 
     public function show(Store $store)
@@ -82,17 +83,13 @@ class StoreController extends Controller
     public function edit(Store $store)
     {
         $this->authorizeStore($store);
-        $salesUsers = Auth::user()->company->users()
-            ->where('role', 'sales')
-            ->where('is_active', true)
-            ->get();
+        $salesUsers = $this->branchScope(\App\Models\User::query())->where('role','sales')->where('is_active',true)->get();
         return view('stores.edit', compact('store', 'salesUsers'));
     }
 
     public function update(Request $request, Store $store)
     {
         $this->authorizeStore($store);
-
         $validated = $request->validate([
             'name'       => 'required|string|max:100',
             'owner_name' => 'nullable|string|max:100',
@@ -106,10 +103,8 @@ class StoreController extends Controller
             'store_type' => 'nullable|string|max:50',
             'user_id'    => 'nullable|exists:users,id',
         ]);
-
         $store->update($validated);
-        return redirect()->route('stores.index')
-            ->with('success', 'Toko "' . $store->name . '" berhasil diperbarui.');
+        return redirect()->route('stores.index')->with('success', 'Toko berhasil diperbarui.');
     }
 
     public function destroy(Store $store)
@@ -117,14 +112,13 @@ class StoreController extends Controller
         $this->authorizeStore($store);
         $name = $store->name;
         $store->delete();
-        return redirect()->route('stores.index')
-            ->with('success', 'Toko "' . $name . '" berhasil dihapus.');
+        return redirect()->route('stores.index')->with('success', "Toko \"$name\" berhasil dihapus.");
     }
 
     private function authorizeStore(Store $store): void
     {
-        if ($store->company_id !== Auth::user()->company_id) {
-            abort(403, 'Akses tidak diizinkan.');
-        }
+        $user = Auth::user();
+        if ($store->company_id !== $user->company_id) abort(403);
+        if (!$user->isOwner() && $store->branch_id !== $user->branch_id) abort(403, 'Toko ini bukan milik cabang Anda.');
     }
 }

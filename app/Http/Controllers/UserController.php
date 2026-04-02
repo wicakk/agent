@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Controllers\Concerns\ScopesByBranch;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -9,20 +10,23 @@ use Illuminate\Support\Facades\Hash;
 
 class UserController extends Controller
 {
+    use ScopesByBranch;
+
     private function ensureAdminOrOwner(): void
     {
-        if (!Auth::user()->isAdminOrOwner()) {
-            abort(403, 'Akses tidak diizinkan.');
-        }
+        if (!Auth::user()->isAdminOrOwner()) abort(403);
     }
 
     public function index()
     {
         $this->ensureAdminOrOwner();
+        $user    = Auth::user();
+        $company = $user->company;
 
-        $company      = Auth::user()->company;
-        $users        = $company->users()
+        // Admin sees only users in their branch; Owner sees all
+        $users = $this->branchScope(User::query())
             ->withCount(['transactions', 'salesActivities'])
+            ->with('branch')
             ->orderByRaw("FIELD(role, 'owner', 'admin', 'sales')")
             ->latest()
             ->paginate(20);
@@ -31,45 +35,58 @@ class UserController extends Controller
         $userCount    = $company->salesCount();
         $userLimit    = $subscription ? $subscription->plan->max_users : 0;
 
-        return view('users.index', compact('users', 'userCount', 'userLimit'));
+        // For Owner: show all branches for assign UI
+        $branches = $user->isOwner()
+            ? $company->branches()->where('is_active', true)->get()
+            : collect();
+
+        return view('users.index', compact('users', 'userCount', 'userLimit', 'branches'));
     }
 
     public function create()
     {
         $this->ensureAdminOrOwner();
-
         $company = Auth::user()->company;
+
         if (!$company->canAddUser()) {
             return redirect()->route('users.index')
                 ->with('error', 'Batas user sales telah tercapai. Upgrade paket untuk menambah lebih banyak user.');
         }
 
-        return view('users.create');
+        $branches = $company->branches()->where('is_active', true)->get();
+        return view('users.create', compact('branches'));
     }
 
     public function store(Request $request)
     {
         $this->ensureAdminOrOwner();
+        $user    = Auth::user();
+        $company = $user->company;
 
-        $company = Auth::user()->company;
         if (!$company->canAddUser()) {
-            return redirect()->route('users.index')
-                ->with('error', 'Batas user sales telah tercapai.');
+            return redirect()->route('users.index')->with('error', 'Batas user sales telah tercapai.');
         }
 
         $validated = $request->validate([
-            'name'     => 'required|string|max:100',
-            'email'    => 'required|email|unique:users,email',
-            'phone'    => 'nullable|string|max:20',
-            'role'     => 'required|in:admin,sales',
-            'password' => 'required|min:8|confirmed',
+            'name'      => 'required|string|max:100',
+            'email'     => 'required|email|unique:users,email',
+            'phone'     => 'nullable|string|max:20',
+            'role'      => 'required|in:admin,sales',
+            'branch_id' => 'nullable|exists:branches,id',
+            'password'  => 'required|min:8|confirmed',
         ]);
+
+        // Admin can only create users in their own branch
+        $branchId = $user->isOwner()
+            ? ($validated['branch_id'] ?? null)
+            : $user->branch_id;
 
         $company->users()->create([
             'name'      => $validated['name'],
             'email'     => $validated['email'],
             'phone'     => $validated['phone'] ?? null,
             'role'      => $validated['role'],
+            'branch_id' => $branchId,
             'password'  => Hash::make($validated['password']),
             'is_active' => true,
         ]);
@@ -82,7 +99,8 @@ class UserController extends Controller
     {
         $this->ensureAdminOrOwner();
         $this->authorizeUser($user);
-        return view('users.edit', compact('user'));
+        $branches = Auth::user()->company->branches()->where('is_active', true)->get();
+        return view('users.edit', compact('user', 'branches'));
     }
 
     public function update(Request $request, User $user)
@@ -91,25 +109,23 @@ class UserController extends Controller
         $this->authorizeUser($user);
 
         $validated = $request->validate([
-            'name'     => 'required|string|max:100',
-            'phone'    => 'nullable|string|max:20',
-            'role'     => 'required|in:owner,admin,sales',
-            'password' => 'nullable|min:8|confirmed',
+            'name'      => 'required|string|max:100',
+            'phone'     => 'nullable|string|max:20',
+            'role'      => 'required|in:owner,admin,sales',
+            'branch_id' => 'nullable|exists:branches,id',
+            'password'  => 'nullable|min:8|confirmed',
         ]);
-
-        // Prevent changing owner role unless you are owner
-        if ($user->isOwner() && !Auth::user()->isOwner()) {
-            abort(403);
-        }
 
         $updateData = [
             'name'  => $validated['name'],
             'phone' => $validated['phone'] ?? null,
         ];
 
-        // Only allow role change if not owner, or if current user is owner
         if (!$user->isOwner()) {
             $updateData['role'] = $validated['role'];
+            if (Auth::user()->isOwner()) {
+                $updateData['branch_id'] = $validated['branch_id'] ?? null;
+            }
         }
 
         if (!empty($validated['password'])) {
@@ -117,7 +133,6 @@ class UserController extends Controller
         }
 
         $user->update($updateData);
-
         return redirect()->route('users.index')
             ->with('success', 'User ' . $user->name . ' berhasil diperbarui.');
     }
@@ -159,8 +174,11 @@ class UserController extends Controller
 
     private function authorizeUser(User $user): void
     {
-        if ($user->company_id !== Auth::user()->company_id) {
-            abort(403, 'Akses tidak diizinkan.');
+        $auth = Auth::user();
+        if ($user->company_id !== $auth->company_id) abort(403);
+        // Admin can only manage users in their own branch
+        if ($auth->isAdmin() && $user->branch_id !== $auth->branch_id) {
+            abort(403, 'User ini bukan dari cabang Anda.');
         }
     }
 }
