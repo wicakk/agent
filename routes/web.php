@@ -40,28 +40,33 @@ Route::middleware(['auth', 'check.subscription', 'branch.scope'])->group(functio
 
     // Distributions
     Route::prefix('distribution')->name('distribution.')->group(function () {
-        Route::get('/',                         [DistributionController::class, 'index'])->name('index');
-        Route::get('/create',                   [DistributionController::class, 'create'])->name('create')->middleware('role:owner,admin');
-        Route::post('/',                        [DistributionController::class, 'store'])->name('store')->middleware('role:owner,admin');
-        Route::get('/{distribution}',          [DistributionController::class, 'show'])->name('show');
-        Route::patch('/{distribution}/status', [DistributionController::class, 'updateStatus'])->name('update-status');
-        Route::delete('/{distribution}',       [DistributionController::class, 'destroy'])->name('destroy')->middleware('role:owner,admin');
+        Route::get('/',                               [DistributionController::class, 'index'])->name('index');
+        Route::get('/create',                         [DistributionController::class, 'create'])->name('create')->middleware('role:owner,admin');
+        Route::post('/',                              [DistributionController::class, 'store'])->name('store')->middleware('role:owner,admin');
+        Route::get('/{distribution}',                [DistributionController::class, 'show'])->name('show');
+        Route::patch('/{distribution}/status',       [DistributionController::class, 'updateStatus'])->name('update-status');
+        Route::post('/{distribution}/depart',        [DistributionController::class, 'depart'])->name('depart');        // Berangkat + GPS
+        Route::post('/{distribution}/deliver',       [DistributionController::class, 'deliver'])->name('deliver');      // Terkirim + foto
+        Route::post('/{distribution}/gps-log',       [DistributionController::class, 'logGps'])->name('gps-log');       // Kirim GPS point
+        Route::get('/{distribution}/track-data',     [DistributionController::class, 'trackData'])->name('track-data'); // Live GPS JSON
+        Route::delete('/{distribution}',             [DistributionController::class, 'destroy'])->name('destroy')->middleware('role:owner,admin');
     });
 
+    // Stores
     Route::resource('stores', StoreController::class);
 
     // Users
     Route::prefix('users')->name('users.')->middleware('role:owner,admin')->group(function () {
-        Route::get('/',               [UserController::class, 'index'])->name('index');
-        Route::get('/create',        [UserController::class, 'create'])->name('create');
-        Route::post('/',              [UserController::class, 'store'])->name('store');
-        Route::get('/{user}/edit',   [UserController::class, 'edit'])->name('edit');
-        Route::put('/{user}',        [UserController::class, 'update'])->name('update');
+        Route::get('/',                [UserController::class, 'index'])->name('index');
+        Route::get('/create',         [UserController::class, 'create'])->name('create');
+        Route::post('/',               [UserController::class, 'store'])->name('store');
+        Route::get('/{user}/edit',    [UserController::class, 'edit'])->name('edit');
+        Route::put('/{user}',         [UserController::class, 'update'])->name('update');
         Route::patch('/{user}/toggle',[UserController::class, 'toggleActive'])->name('toggle');
-        Route::delete('/{user}',     [UserController::class, 'destroy'])->name('destroy');
+        Route::delete('/{user}',      [UserController::class, 'destroy'])->name('destroy');
     });
 
-    // Branches (Owner only)
+    // Branches
     Route::prefix('branches')->name('branches.')->middleware('role:owner')->group(function () {
         Route::get('/',               [BranchController::class, 'index'])->name('index');
         Route::get('/create',        [BranchController::class, 'create'])->name('create');
@@ -80,13 +85,13 @@ Route::middleware(['auth', 'check.subscription', 'branch.scope'])->group(functio
         Route::get('/excel', [ReportController::class, 'exportExcel'])->name('export-excel');
     });
 
-    // Tracking
+    // Tracking GPS
     Route::prefix('tracking')->name('tracking.')->group(function () {
         Route::get('/',         [TrackingController::class, 'index'])->name('index');
         Route::post('/log-gps', [TrackingController::class, 'logGps'])->name('log-gps');
     });
 
-    // Billing (Owner only)
+    // Billing
     Route::prefix('billing')->name('billing.')->middleware('role:owner')->group(function () {
         Route::get('/',        [BillingController::class, 'index'])->name('index');
         Route::post('/upgrade',[BillingController::class, 'upgrade'])->name('upgrade');
